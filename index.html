@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>LaManna Big Year · Stats</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --forest: #1A2E1A;
+    --cream: #F5EDD6;
+    --bark: #5C3D1E;
+    --gold: #C8952A;
+    --mist: #EEF2EC;
+    --sage: #4A6741;
+    --rust: #8B3E2F;
+    --ink: #1E1E1A;
+    --pale-gold: #F0D898;
+    --radius: 4px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Source Sans 3', sans-serif;
+    background: var(--forest);
+    color: var(--cream);
+    min-height: 100vh;
+  }
+
+  /* ── LOADING ── */
+  #loading-overlay {
+    position: fixed; inset: 0;
+    background: var(--forest);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 1rem; z-index: 9999;
+  }
+  #loading-overlay.hidden { display: none; }
+  .loading-bird { font-size: 2.5rem; animation: flap 1s infinite alternate; }
+  @keyframes flap { from { transform: translateY(0); } to { transform: translateY(-8px); } }
+  .loading-text { font-family: 'Playfair Display', serif; color: var(--gold); font-size: 1rem; }
+
+  /* ── NAV ── */
+  nav {
+    background: rgba(26,46,26,0.97);
+    border-bottom: 1px solid rgba(200,149,42,0.3);
+    padding: 0 1rem;
+    display: flex; align-items: center; gap: 0;
+    position: sticky; top: 0; z-index: 100;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  nav::-webkit-scrollbar { display: none; }
+  .nav-brand {
+    font-family: 'Playfair Display', serif;
+    color: var(--gold);
+    font-size: 1rem;
+    white-space: nowrap;
+    padding: 0.85rem 1.25rem 0.85rem 0;
+    border-right: 1px solid rgba(200,149,42,0.2);
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+  }
+  .nav-tab {
+    background: none; border: none; color: rgba(245,237,214,0.55);
+    font-family: 'Source Sans 3', sans-serif; font-size: 0.88rem;
+    padding: 0.85rem 0.9rem; cursor: pointer; white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+  .nav-tab:hover { color: var(--cream); }
+  .nav-tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+  /* ── PAGES ── */
+  .page { display: none; padding: 1.5rem 1rem 3rem; max-width: 900px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* ── SHARED ELEMENTS ── */
+  .page-title {
+    font-family: 'Playfair Display', serif;
+    color: var(--gold); font-size: 1.6rem;
+    margin-bottom: 0.25rem;
+  }
+  .page-sub { color: rgba(245,237,214,0.5); font-size: 0.9rem; margin-bottom: 1.75rem; }
+  .card {
+    background: rgba(245,237,214,0.04);
+    border: 1px solid rgba(200,149,42,0.18);
+    border-radius: 6px;
+    padding: 1.25rem 1.25rem 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .card-title {
+    font-family: 'Playfair Display', serif;
+    color: var(--pale-gold); font-size: 1.05rem;
+    margin-bottom: 1rem;
+  }
+  .empty-state {
+    color: rgba(245,237,214,0.35); font-size: 0.9rem;
+    text-align: center; padding: 2rem 0;
+  }
+
+  /* ── SCORE OVER TIME ── */
+  #chart-score-time { width: 100% !important; }
+
+  /* ── MAP ── */
+  #map-pins, #map-heat {
+    width: 100%; height: 420px;
+    border-radius: 6px; overflow: hidden;
+  }
+  .map-toggle { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .map-toggle button {
+    background: rgba(245,237,214,0.06); border: 1px solid rgba(200,149,42,0.25);
+    color: rgba(245,237,214,0.6); border-radius: var(--radius);
+    padding: 0.4rem 0.9rem; font-size: 0.85rem; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .map-toggle button.active {
+    background: rgba(200,149,42,0.15); border-color: var(--gold); color: var(--gold);
+  }
+
+  /* ── TOP 10 ── */
+  .top10-row {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.6rem 0; border-bottom: 1px solid rgba(200,149,42,0.1);
+  }
+  .top10-row:last-child { border-bottom: none; }
+  .top10-rank {
+    font-family: 'Playfair Display', serif; font-size: 1.2rem;
+    color: var(--gold); width: 2rem; flex-shrink: 0; text-align: center;
+  }
+  .top10-species { flex: 1; font-size: 0.95rem; color: var(--cream); }
+  .top10-meta { font-size: 0.8rem; color: rgba(245,237,214,0.45); }
+  .top10-count {
+    font-size: 0.8rem; color: var(--pale-gold);
+    background: rgba(200,149,42,0.12); border-radius: 20px;
+    padding: 0.15rem 0.6rem;
+  }
+
+  /* ── EXCLUSIVES ── */
+  .exclusives-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+  }
+  .exclusive-card {
+    background: rgba(245,237,214,0.04); border: 1px solid rgba(200,149,42,0.15);
+    border-radius: 6px; padding: 0.75rem 0.9rem;
+  }
+  .exclusive-species { font-size: 0.9rem; color: var(--pale-gold); margin-bottom: 0.2rem; }
+  .exclusive-who { font-size: 0.8rem; color: rgba(245,237,214,0.5); }
+
+  /* ── BEST DAY ── */
+  .bestday-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 0; border-bottom: 1px solid rgba(200,149,42,0.1);
+  }
+  .bestday-row:last-child { border-bottom: none; }
+  .bestday-user { font-size: 0.95rem; color: var(--cream); }
+  .bestday-date { font-size: 0.8rem; color: rgba(245,237,214,0.45); }
+  .bestday-pts {
+    font-family: 'Playfair Display', serif; font-size: 1.4rem; color: var(--gold);
+  }
+  .bestday-species { font-size: 0.78rem; color: rgba(245,237,214,0.4); margin-top: 0.1rem; }
+
+  /* ── LEADERBOARD ── */
+  .lb-row {
+    display: flex; align-items: center; gap: 1rem;
+    padding: 0.85rem 0; border-bottom: 1px solid rgba(200,149,42,0.1);
+  }
+  .lb-row:last-child { border-bottom: none; }
+  .lb-rank {
+    font-family: 'Playfair Display', serif; font-size: 1.5rem;
+    width: 2.5rem; text-align: center; flex-shrink: 0;
+  }
+  .lb-rank.gold { color: #FFD700; }
+  .lb-rank.silver { color: #C0C0C0; }
+  .lb-rank.bronze { color: #CD7F32; }
+  .lb-rank.other { color: rgba(245,237,214,0.35); }
+  .lb-name { flex: 1; font-size: 1rem; color: var(--cream); }
+  .lb-sub { font-size: 0.8rem; color: rgba(245,237,214,0.4); }
+  .lb-pts { font-family: 'Playfair Display', serif; font-size: 1.6rem; color: var(--gold); }
+  .lb-species { font-size: 0.8rem; color: rgba(245,237,214,0.45); }
+
+  @media (max-width: 480px) {
+    .page { padding: 1rem 0.75rem 3rem; }
+    .page-title { font-size: 1.3rem; }
+    #map-pins, #map-heat { height: 300px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loading-overlay">
+  <div class="loading-bird">🦅</div>
+  <div class="loading-text">Loading stats…</div>
+</div>
+
+<nav id="nav-mount"></nav>
+
+<!-- SCORE OVER TIME -->
+<div class="page active" id="page-score">
+  <div class="page-title">Score Over Time</div>
+  <div class="page-sub">Cumulative points across the year — one line per birder</div>
+  <div class="card">
+    <canvas id="chart-score-time" height="320"></canvas>
+  </div>
+</div>
+
+<!-- MAP -->
+<div class="page" id="page-map">
+  <div class="page-title">Sighting Map</div>
+  <div class="page-sub">Every sighting logged with a location</div>
+  <div class="card">
+    <div class="map-toggle" id="map-user-filters"></div>
+    <div id="map-pins"></div>
+  </div>
+</div>
+
+<!-- HEATMAP -->
+<div class="page" id="page-heat">
+  <div class="page-title">Heatmap</div>
+  <div class="page-sub">Density of all sightings across the region</div>
+  <div class="card">
+    <div id="map-heat"></div>
+  </div>
+</div>
+
+<!-- EXCLUSIVES -->
+<div class="page" id="page-exclusives">
+  <div class="page-title">Solo Finds</div>
+  <div class="page-sub">Species logged by only one person</div>
+  <div class="card">
+    <div class="map-toggle" id="exclusives-user-filters"></div>
+    <div id="exclusives-grid" class="exclusives-grid" style="margin-top:1rem;"></div>
+  </div>
+</div>
+
+<!-- TOP 10 -->
+<div class="page" id="page-top10">
+  <div class="page-title">Top 10 Species</div>
+  <div class="page-sub">Most-logged birds — tiebreaker: who found it first</div>
+  <div class="card" id="top10-list"></div>
+</div>
+
+<!-- BEST DAY -->
+<div class="page" id="page-bestday">
+  <div class="page-title">Best Day</div>
+  <div class="page-sub">Highest single-day point total per birder</div>
+  <div class="card" id="bestday-list"></div>
+</div>
+
+<!-- LEADERBOARD -->
+<div class="page" id="page-leaderboard">
+  <div class="page-title">Leaderboard</div>
+  <div class="page-sub">Final standings — total points · unique species</div>
+  <div class="card" id="leaderboard-list"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getFirestore, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBiVgA4zbn9FtGnfZD8OmPUkU5TN6uAFEc",
+  authDomain: "lamanna-bigyear.firebaseapp.com",
+  projectId: "lamanna-bigyear",
+  storageBucket: "lamanna-bigyear.firebasestorage.app",
+  messagingSenderId: "767785490516",
+  appId: "1:767785490516:web:13ee58cd1d3b1e9a24f5c1"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+
+// ── NAV ────────────────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'score',      label: '📈 Score Over Time' },
+  { id: 'map',        label: '🗺 Map' },
+  { id: 'heat',       label: '🔥 Heatmap' },
+  { id: 'exclusives', label: '🎯 Solo Finds' },
+  { id: 'top10',      label: '🏅 Top 10' },
+  { id: 'bestday',    label: '⭐ Best Day' },
+  { id: 'leaderboard',label: '🏆 Leaderboard' },
+];
+
+function renderNav(active) {
+  document.getElementById('nav-mount').innerHTML = `
+    <nav>
+      <div class="nav-brand">🦅 Big Year Stats</div>
+      ${TABS.map(t => `
+        <button class="nav-tab${active === t.id ? ' active' : ''}"
+          onclick="window.showTab('${t.id}')">${t.label}</button>
+      `).join('')}
+    </nav>`;
+}
+
+window.showTab = function(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  renderNav(id);
+  // Invalidate map sizes after display
+  if (id === 'map'  && window._mapPins)  { setTimeout(() => window._mapPins.invalidateSize(),  50); }
+  if (id === 'heat' && window._mapHeat)  { setTimeout(() => window._mapHeat.invalidateSize(),  50); }
+};
+
+// ── DATA LOAD ───────────────────────────────────────────────────────────────
+// allData[userKey] = { display, birds: [...] }
+const allData = {};
+
+async function loadAll() {
+  const usersSnap = await getDocs(collection(db, 'users'));
+  const fetches = [];
+  usersSnap.forEach(userDoc => {
+    const info = userDoc.data();
+    allData[userDoc.id] = { display: info.display || userDoc.id, birds: [] };
+    fetches.push(
+      getDocs(collection(db, 'users', userDoc.id, 'birds')).then(bSnap => {
+        bSnap.forEach(b => {
+          const d = b.data();
+          allData[userDoc.id].birds.push({
+            id:        b.id,
+            species:   d.species   || '',
+            date:      d.date      || '',
+            location:  d.location  || '',
+            lat:       d.lat       ?? null,
+            lng:       d.lng       ?? null,
+            score:     d.score     || 1,
+            detection: d.detection || (d.score === 2 ? 'seen' : 'heard'),
+            note:      d.note      || '',
+            addedAt:   d.addedAt   || d.timestamp || null,
+          });
+        });
+      })
+    );
+  });
+  await Promise.all(fetches);
+  // Sort each user's birds by date
+  Object.values(allData).forEach(u => {
+    u.birds.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  });
+}
+
+// ── COLOR PALETTE (one per user, cycling) ───────────────────────────────────
+const PALETTE = ['#C8952A','#7EB87E','#E8836A','#7EB2C8','#B87ED4','#E8C86A','#C87E9A'];
+function userColor(idx) { return PALETTE[idx % PALETTE.length]; }
+
+// ── RENDER: SCORE OVER TIME ─────────────────────────────────────────────────
+function renderScoreTime() {
+  const users = Object.entries(allData);
+  // Collect all unique dates
+  const allDates = [...new Set(
+    users.flatMap(([,u]) => u.birds.map(b => b.date).filter(Boolean))
+  )].sort();
+
+  const datasets = users.map(([key, u], idx) => {
+    let cum = 0;
+    const dataMap = {};
+    u.birds.forEach(b => { if (b.date) { dataMap[b.date] = (dataMap[b.date] || 0) + (b.score || 1); } });
+    const data = allDates.map(d => { cum += (dataMap[d] || 0); return cum; });
+    return {
+      label: u.display,
+      data,
+      borderColor: userColor(idx),
+      backgroundColor: userColor(idx) + '22',
+      tension: 0.3,
+      fill: false,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+    };
+  });
+
+  new Chart(document.getElementById('chart-score-time'), {
+    type: 'line',
+    data: { labels: allDates, datasets },
+    options: {
+      responsive: true,
+      animation: { duration: 1200, easing: 'easeInOutQuart' },
+      plugins: {
+        legend: { labels: { color: '#F5EDD6', font: { family: 'Source Sans 3' } } },
+        tooltip: { mode: 'index', intersect: false },
+      },
+      scales: {
+        x: {
+          ticks: { color: 'rgba(245,237,214,0.5)', maxTicksLimit: 12 },
+          grid:  { color: 'rgba(200,149,42,0.08)' },
+        },
+        y: {
+          ticks: { color: 'rgba(245,237,214,0.5)' },
+          grid:  { color: 'rgba(200,149,42,0.08)' },
+        },
+      },
+    },
+  });
+}
+
+// ── RENDER: MAP (pins) ───────────────────────────────────────────────────────
+function renderMap() {
+  const users = Object.entries(allData);
+  const map = L.map('map-pins', { center: [40.5, -82.5], zoom: 7 });
+  window._mapPins = map;
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO', maxZoom: 18
+  }).addTo(map);
+
+  // Per-user layer groups for toggling
+  const layers = {};
+  users.forEach(([key, u], idx) => {
+    const color = userColor(idx);
+    const group = L.layerGroup().addTo(map);
+    layers[key] = group;
+    u.birds.forEach(b => {
+      if (b.lat == null || b.lng == null) return;
+      const marker = L.circleMarker([b.lat, b.lng], {
+        radius: 6, color, fillColor: color, fillOpacity: 0.75, weight: 1.5
+      });
+      marker.bindPopup(`<b>${b.species}</b><br>${u.display}<br>${b.date}${b.location ? '<br>' + b.location : ''}`);
+      group.addLayer(marker);
+    });
+  });
+
+  // User filter buttons
+  const filterEl = document.getElementById('map-user-filters');
+  const activeUsers = new Set(users.map(([k]) => k));
+  filterEl.innerHTML = users.map(([key, u], idx) =>
+    `<button class="active" style="border-color:${userColor(idx)};color:${userColor(idx)};"
+      data-key="${key}" onclick="window.toggleMapUser('${key}', this)">${u.display}</button>`
+  ).join('');
+
+  window.toggleMapUser = function(key, btn) {
+    if (activeUsers.has(key)) {
+      activeUsers.delete(key);
+      map.removeLayer(layers[key]);
+      btn.classList.remove('active');
+    } else {
+      activeUsers.add(key);
+      map.addLayer(layers[key]);
+      btn.classList.add('active');
+    }
+  };
+}
+
+// ── RENDER: HEATMAP ──────────────────────────────────────────────────────────
+function renderHeatmap() {
+  const map = L.map('map-heat', { center: [40.5, -82.5], zoom: 7 });
+  window._mapHeat = map;
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO', maxZoom: 18
+  }).addTo(map);
+
+  const points = Object.values(allData)
+    .flatMap(u => u.birds)
+    .filter(b => b.lat != null && b.lng != null)
+    .map(b => [b.lat, b.lng, 1]);
+
+  if (points.length) {
+    L.heatLayer(points, { radius: 25, blur: 15, maxZoom: 13,
+      gradient: { 0.4: '#1A2E1A', 0.6: '#4A6741', 0.8: '#C8952A', 1.0: '#F0D898' }
+    }).addTo(map);
+  }
+}
+
+// ── RENDER: EXCLUSIVES ───────────────────────────────────────────────────────
+function renderExclusives() {
+  // Count how many users logged each species
+  const speciesUsers = {}; // species -> Set of userKeys
+  Object.entries(allData).forEach(([key, u]) => {
+    u.birds.forEach(b => {
+      if (!b.species) return;
+      if (!speciesUsers[b.species]) speciesUsers[b.species] = new Set();
+      speciesUsers[b.species].add(key);
+    });
+  });
+
+  // Species with exactly 1 user
+  const exclusives = Object.entries(speciesUsers)
+    .filter(([, s]) => s.size === 1)
+    .map(([species, s]) => ({ species, userKey: [...s][0] }))
+    .sort((a, b) => a.species.localeCompare(b.species));
+
+  const users = Object.entries(allData);
+
+  // Filter buttons
+  const filterEl = document.getElementById('exclusives-user-filters');
+  const activeUsers = new Set(users.map(([k]) => k));
+  filterEl.innerHTML = users.map(([key, u], idx) =>
+    `<button class="active" style="border-color:${userColor(idx)};color:${userColor(idx)};"
+      data-key="${key}" onclick="window.toggleExclusiveUser('${key}', this)">${u.display}</button>`
+  ).join('');
+
+  function renderGrid() {
+    const grid = document.getElementById('exclusives-grid');
+    const filtered = exclusives.filter(e => activeUsers.has(e.userKey));
+    if (!filtered.length) { grid.innerHTML = '<div class="empty-state">No solo finds for selected birders.</div>'; return; }
+    grid.innerHTML = filtered.map(e => {
+      const u = allData[e.userKey];
+      return `<div class="exclusive-card">
+        <div class="exclusive-species">${e.species}</div>
+        <div class="exclusive-who">${u ? u.display : e.userKey}</div>
+      </div>`;
+    }).join('');
+  }
+
+  window.toggleExclusiveUser = function(key, btn) {
+    if (activeUsers.has(key)) { activeUsers.delete(key); btn.classList.remove('active'); }
+    else { activeUsers.add(key); btn.classList.add('active'); }
+    renderGrid();
+  };
+  renderGrid();
+}
+
+// ── RENDER: TOP 10 ───────────────────────────────────────────────────────────
+function renderTop10() {
+  // Count sightings per species; tiebreak by earliest date any user logged it
+  const speciesData = {}; // species -> { count, firstDate }
+  Object.values(allData).forEach(u => {
+    u.birds.forEach(b => {
+      if (!b.species) return;
+      if (!speciesData[b.species]) speciesData[b.species] = { count: 0, firstDate: b.date || '9999' };
+      speciesData[b.species].count++;
+      if (b.date && b.date < speciesData[b.species].firstDate) speciesData[b.species].firstDate = b.date;
+    });
+  });
+
+  const sorted = Object.entries(speciesData)
+    .sort(([, a], [, b]) => b.count - a.count || a.firstDate.localeCompare(b.firstDate))
+    .slice(0, 10);
+
+  const el = document.getElementById('top10-list');
+  if (!sorted.length) { el.innerHTML = '<div class="empty-state">No data yet.</div>'; return; }
+  el.innerHTML = sorted.map(([species, d], i) => `
+    <div class="top10-row">
+      <div class="top10-rank">${i + 1}</div>
+      <div class="top10-species">${species}</div>
+      <div class="top10-meta">${d.firstDate !== '9999' ? 'First: ' + d.firstDate : ''}</div>
+      <div class="top10-count">${d.count} ${d.count === 1 ? 'birder' : 'birders'}</div>
+    </div>
+  `).join('');
+}
+
+// ── RENDER: BEST DAY ─────────────────────────────────────────────────────────
+function renderBestDay() {
+  const el = document.getElementById('bestday-list');
+  const rows = Object.entries(allData).map(([key, u]) => {
+    // Group birds by date, sum points
+    const byDate = {};
+    u.birds.forEach(b => {
+      if (!b.date) return;
+      if (!byDate[b.date]) byDate[b.date] = { pts: 0, birds: [] };
+      byDate[b.date].pts += (b.score || 1);
+      byDate[b.date].birds.push(b.species);
+    });
+    const best = Object.entries(byDate).sort(([,a],[,b]) => b.pts - a.pts)[0];
+    return best ? { display: u.display, date: best[0], pts: best[1].pts, species: best[1].birds } : null;
+  }).filter(Boolean).sort((a, b) => b.pts - a.pts);
+
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">No data yet.</div>'; return; }
+  el.innerHTML = rows.map(r => `
+    <div class="bestday-row">
+      <div>
+        <div class="bestday-user">${r.display}</div>
+        <div class="bestday-date">${r.date}</div>
+        <div class="bestday-species">${r.species.slice(0, 5).join(', ')}${r.species.length > 5 ? ' +' + (r.species.length - 5) + ' more' : ''}</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="bestday-pts">${r.pts} pts</div>
+        <div class="bestday-species">${r.species.length} species</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── RENDER: LEADERBOARD ──────────────────────────────────────────────────────
+function renderLeaderboard() {
+  const el = document.getElementById('leaderboard-list');
+  const rows = Object.entries(allData).map(([key, u]) => {
+    const pts = u.birds.reduce((s, b) => s + (b.score || 1), 0);
+    const species = new Set(u.birds.map(b => b.species).filter(Boolean)).size;
+    return { display: u.display, pts, species };
+  }).sort((a, b) => b.pts - a.pts || b.species - a.species);
+
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">No data yet.</div>'; return; }
+  const rankCls = i => ['gold','silver','bronze'][i] || 'other';
+  const rankEmoji = i => ['🥇','🥈','🥉'][i] || (i + 1);
+  el.innerHTML = rows.map((r, i) => `
+    <div class="lb-row">
+      <div class="lb-rank ${rankCls(i)}">${rankEmoji(i)}</div>
+      <div>
+        <div class="lb-name">${r.display}</div>
+        <div class="lb-species">${r.species} species</div>
+      </div>
+      <div class="lb-pts">${r.pts} pts</div>
+    </div>
+  `).join('');
+}
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    await loadAll();
+    renderNav('score');
+    renderScoreTime();
+    renderTop10();
+    renderBestDay();
+    renderLeaderboard();
+    // Defer map/heatmap/exclusives until tab is opened (maps need visible container)
+    let mapsReady = false;
+    const origShowTab = window.showTab;
+    window.showTab = function(id) {
+      origShowTab(id);
+      if (!mapsReady && (id === 'map' || id === 'heat' || id === 'exclusives')) {
+        renderMap();
+        renderHeatmap();
+        renderExclusives();
+        mapsReady = true;
+      }
+    };
+  } catch(e) {
+    console.error('Load failed:', e);
+  } finally {
+    document.getElementById('loading-overlay').classList.add('hidden');
+  }
+})();
+</script>
+</body>
+</html>
