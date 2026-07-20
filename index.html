@@ -506,10 +506,16 @@ function renderScoreTime() {
           grid:  { color: 'rgba(200,149,42,0.08)' },
         },
         y: {
-          ticks: { color: 'rgba(245,237,214,0.5)' },
-          grid:  { color: 'rgba(200,149,42,0.08)' },
-          min: 0,
-        },
+  min: 0,
+  suggestedMax: 10,   // Start at a 0–10 range
+  ticks: {
+    stepSize: 1,       // or 2 if you prefer fewer tick marks
+    color: 'rgba(245,237,214,0.5)'
+  },
+  grid: {
+    color: 'rgba(200,149,42,0.08)'
+  }
+},
       },
     },
   });
