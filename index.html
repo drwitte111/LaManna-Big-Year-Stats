@@ -60,23 +60,33 @@
   nav {
     background: rgba(26,46,26,0.97);
     border-bottom: 1px solid rgba(200,149,42,0.3);
-    padding: 0 1rem;
-    display: flex; align-items: center; gap: 0;
+    padding: 0 1.5rem;
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+    padding-top: env(safe-area-inset-top);
+    display: flex; align-items: center; justify-content: space-between;
+    height: calc(52px + env(safe-area-inset-top));
     position: sticky; top: 0; z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+  .nav-brand {
+    font-family: 'Playfair Display', serif;
+    color: var(--gold); font-size: 1rem;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .nav-tabs {
+    display: flex; align-items: center; gap: 0;
     overflow-x: auto; -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
   }
-  nav::-webkit-scrollbar { display: none; }
-  .nav-brand {
-    font-family: 'Playfair Display', serif;
-    color: var(--gold);
-    font-size: 1rem;
-    white-space: nowrap;
-    padding: 0.85rem 1.25rem 0.85rem 0;
-    border-right: 1px solid rgba(200,149,42,0.2);
-    margin-right: 0.5rem;
+  .nav-tabs::-webkit-scrollbar { display: none; }
+  .nav-hamburger {
+    display: none; background: none; border: 1px solid rgba(200,149,42,0.4);
+    border-radius: var(--radius); color: var(--gold); font-size: 1.05rem;
+    line-height: 1; padding: 0.4rem 0.65rem; cursor: pointer; transition: all 0.15s;
     flex-shrink: 0;
   }
+  .nav-hamburger:hover { background: rgba(200,149,42,0.15); }
   .nav-tab {
     background: none; border: none; color: rgba(245,237,214,0.55);
     font-family: 'Source Sans 3', sans-serif; font-size: 0.88rem;
@@ -203,7 +213,27 @@
   .lb-pts { font-family: 'Playfair Display', serif; font-size: 1.6rem; color: var(--gold); }
   .lb-species { font-size: 0.8rem; color: rgba(245,237,214,0.45); }
 
-  @media (max-width: 480px) {
+  @media (max-width: 700px) {
+    nav {
+      padding-left: max(1rem, env(safe-area-inset-left));
+      padding-right: max(1rem, env(safe-area-inset-right));
+    }
+    .nav-hamburger { display: inline-block; }
+    .nav-tabs {
+      display: none;
+      position: absolute; top: 100%; left: 0; right: 0;
+      flex-direction: column; align-items: stretch; gap: 0;
+      background: #16281a; border-bottom: 1px solid rgba(200,149,42,0.3);
+      padding: 0.4rem max(1rem, env(safe-area-inset-left));
+      max-height: 75vh; overflow-y: auto; z-index: 200;
+    }
+    .nav-tabs.open { display: flex; }
+    .nav-tab {
+      font-size: 0.9rem; padding: 0.7rem 0.85rem;
+      text-align: left; border-bottom: none;
+      border-left: 2px solid transparent;
+    }
+    .nav-tab.active { border-left-color: var(--gold); border-bottom: none; }
     .page { padding: 1rem 0.75rem 3rem; }
     .page-title { font-size: 1.3rem; }
     #map-pins, #map-heat { height: 300px; }
@@ -310,21 +340,33 @@ const TABS = [
 ];
 
 function renderNav(active) {
+  const tabs = TABS.map(t =>
+    `<button class="nav-tab${active === t.id ? ' active' : ''}"
+      onclick="window.navAndClose('${t.id}')">${t.label}</button>`
+  ).join('');
   document.getElementById('nav-mount').innerHTML = `
     <nav>
       <div class="nav-brand">🦅 Big Year Stats</div>
-      ${TABS.map(t => `
-        <button class="nav-tab${active === t.id ? ' active' : ''}"
-          onclick="window.showTab('${t.id}')">${t.label}</button>
-      `).join('')}
+      <button class="nav-hamburger" onclick="window.toggleNavMenu()" aria-label="Menu">☰</button>
+      <div class="nav-tabs" id="nav-tabs-list">${tabs}</div>
     </nav>`;
 }
+
+window.toggleNavMenu = function() {
+  const el = document.getElementById('nav-tabs-list');
+  if (el) el.classList.toggle('open');
+};
+
+window.navAndClose = function(id) {
+  const el = document.getElementById('nav-tabs-list');
+  if (el) el.classList.remove('open');
+  window.showTab(id);
+};
 
 window.showTab = function(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
   renderNav(id);
-  // Invalidate map sizes after display
   if (id === 'map'  && window._mapPins)  { setTimeout(() => window._mapPins.invalidateSize(),  50); }
   if (id === 'heat' && window._mapHeat)  { setTimeout(() => window._mapHeat.invalidateSize(),  50); }
 };
@@ -373,10 +415,17 @@ function userColor(idx) { return PALETTE[idx % PALETTE.length]; }
 // ── RENDER: SCORE OVER TIME ─────────────────────────────────────────────────
 function renderScoreTime() {
   const users = Object.entries(allData);
-  // Collect all unique dates
-  const allDates = [...new Set(
+  // Collect all unique dates, prepend day-before so every line starts at 0
+  const datesOnly = [...new Set(
     users.flatMap(([,u]) => u.birds.map(b => b.date).filter(Boolean))
   )].sort();
+  function dayBefore(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+  const startDate = datesOnly.length ? dayBefore(datesOnly[0]) : null;
+  const allDates = startDate ? [startDate, ...datesOnly] : datesOnly;
 
   const datasets = users.map(([key, u], idx) => {
     let cum = 0;
@@ -691,6 +740,15 @@ function renderLeaderboard() {
     document.getElementById('loading-overlay').classList.add('hidden');
   }
 })();
+
+// Close nav drawer when clicking outside
+document.addEventListener('click', e => {
+  const el = document.getElementById('nav-tabs-list');
+  if (el && el.classList.contains('open') &&
+      !e.target.closest('.nav-tabs') && !e.target.closest('.nav-hamburger')) {
+    el.classList.remove('open');
+  }
+});
 </script>
 </body>
 </html>
