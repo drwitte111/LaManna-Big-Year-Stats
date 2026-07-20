@@ -500,7 +500,7 @@ function renderScoreTime() {
 
   let playIndex  = allDates.length - 1; // start showing full chart
   let rafId      = null;                 // requestAnimationFrame handle
-  let speedIndex = 1;
+  let speedIndex = 0;
 
   // ms per date step — lower = faster. RAF interpolates sub-frames within each step.
   const SPEEDS = [
