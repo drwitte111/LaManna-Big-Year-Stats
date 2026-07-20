@@ -495,62 +495,87 @@ function renderScoreTime() {
   });
 
   // ── Playback state ───────────────────────────────────────────────────────
-  let playIndex   = 0;
-  let playTimer   = null;
-  let speedIndex  = 1;
-  const SPEEDS    = [
-    { label: '0.5×', ms: 120 },
-    { label: '1×',   ms: 60  },
-    { label: '2×',   ms: 30  },
-    { label: '4×',   ms: 15  },
+  // Uses requestAnimationFrame + linear interpolation between date steps
+  // so lines grow smoothly rather than snapping frame-to-frame.
+
+  let playIndex  = allDates.length - 1; // start showing full chart
+  let rafId      = null;                 // requestAnimationFrame handle
+  let speedIndex = 1;
+
+  // ms per date step — lower = faster. RAF interpolates sub-frames within each step.
+  const SPEEDS = [
+    { label: '1×',  msPerStep: 600 },
+    { label: '2×',  msPerStep: 300 },
+    { label: '4×',  msPerStep: 150 },
+    { label: '8×',  msPerStep: 75  },
   ];
+
   const playBtn   = document.getElementById('play-btn');
   const dateLabel = document.getElementById('play-date');
   const speedBtn  = document.getElementById('play-speed');
 
-  function setDateLabel(idx) {
+  // Render chart up to `idx` with the last segment drawn at fraction t (0–1)
+  function renderAt(idx, t) {
+    const visibleLabels = allDates.slice(0, idx + 1);
+    chart.data.labels = visibleLabels;
+    chart.data.datasets.forEach(ds => {
+      const slice = ds.fullData.slice(0, idx + 1);
+      // Interpolate the last visible point between previous value and current
+      if (t < 1 && idx > 0) {
+        const prev = ds.fullData[idx - 1] ?? 0;
+        const curr = ds.fullData[idx]     ?? 0;
+        slice[slice.length - 1] = prev + (curr - prev) * t;
+      }
+      ds.data = slice;
+    });
+    chart.update('none');
     dateLabel.textContent = allDates[idx] || '';
   }
 
-  function stepTo(idx) {
-    chart.data.labels = allDates.slice(0, idx + 1);
-    chart.data.datasets.forEach(ds => { ds.data = ds.fullData.slice(0, idx + 1); });
-    chart.update('none');
-    setDateLabel(idx);
-    playIndex = idx;
-  }
-
   function stopPlay() {
-    clearInterval(playTimer);
-    playTimer = null;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     playBtn.textContent = playIndex >= allDates.length - 1 ? '↺ Replay' : '▶ Play';
   }
 
   function startPlay() {
-    // If at end, restart from beginning
-    if (playIndex >= allDates.length - 1) {
-      stepTo(0);
-    }
+    if (playIndex >= allDates.length - 1) { renderAt(0, 1); playIndex = 0; }
     playBtn.textContent = '⏹ Stop';
-    playTimer = setInterval(() => {
-      if (playIndex >= allDates.length - 1) { stopPlay(); return; }
-      stepTo(playIndex + 1);
-    }, SPEEDS[speedIndex].ms);
+
+    let stepStart = null; // timestamp when current step began
+
+    function frame(ts) {
+      if (!stepStart) stepStart = ts;
+      const msPerStep = SPEEDS[speedIndex].msPerStep;
+      const elapsed   = ts - stepStart;
+      const t         = Math.min(elapsed / msPerStep, 1);
+
+      renderAt(playIndex, t);
+
+      if (t >= 1) {
+        if (playIndex >= allDates.length - 1) { stopPlay(); return; }
+        playIndex++;
+        stepStart = ts;
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+
+    rafId = requestAnimationFrame(frame);
   }
 
   window.playChart = function() {
-    if (playTimer) { stopPlay(); } else { startPlay(); }
+    if (rafId) { stopPlay(); } else { startPlay(); }
   };
 
   window.cycleSpeed = function() {
     speedIndex = (speedIndex + 1) % SPEEDS.length;
     speedBtn.textContent = SPEEDS[speedIndex].label;
-    if (playTimer) { stopPlay(); startPlay(); } // restart at new speed
+    // If currently playing, keep going at new speed (stepStart resets naturally)
   };
 
-  // Show full chart immediately (no play needed unless user wants animation)
-  stepTo(allDates.length - 1);
+  // Show full chart on load
+  renderAt(allDates.length - 1, 1);
   playBtn.textContent = '↺ Replay';
+  speedBtn.textContent = SPEEDS[speedIndex].label;
 }
 
 // ── RENDER: MAP (pins) ───────────────────────────────────────────────────────
