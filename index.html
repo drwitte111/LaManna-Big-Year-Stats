@@ -607,68 +607,45 @@ function renderMap() {
     attribution: '© OpenStreetMap © CARTO', maxZoom: 18
   }).addTo(map);
 
-  // Group sightings by lat+lng+species — shared location = one pin, multiple names
-  // Key: "lat,lng,species" → { lat, lng, species, location, entries: [{userKey, display, date}] }
-  const pinMap = {};
-  users.forEach(([userKey, u]) => {
+  // Count how many sightings share each lat/lng so we can spread them
+  const coordCount = {};
+  users.forEach(([, u]) => {
     u.birds.forEach(b => {
       if (b.lat == null || b.lng == null) return;
-      const key = `${b.lat},${b.lng},${(b.species||'').toLowerCase()}`;
-      if (!pinMap[key]) {
-        pinMap[key] = { lat: b.lat, lng: b.lng, species: b.species, location: b.location, entries: [] };
-      }
-      pinMap[key].entries.push({ userKey, display: u.display, date: b.date });
+      const key = `${b.lat},${b.lng}`;
+      coordCount[key] = (coordCount[key] || 0) + 1;
     });
   });
+  const coordIndex = {};
+  function getOffset(lat, lng) {
+    const key = `${lat},${lng}`;
+    const total = coordCount[key] || 1;
+    if (total === 1) return [lat, lng];
+    const idx = coordIndex[key] = (coordIndex[key] ?? -1) + 1;
+    const angle = (2 * Math.PI * idx) / total;
+    return [lat + Math.sin(angle) * 0.018, lng + Math.cos(angle) * 0.018];
+  }
 
-  // Build markers; track which markers each user owns so toggling works
-  const userMarkers = {}; // userKey -> Set of L.circleMarker
-  users.forEach(([k]) => { userMarkers[k] = new Set(); });
-
-  const allPins = Object.values(pinMap);
-  allPins.forEach(pin => {
-    // Color: if one user → their color; if multiple → gold shared indicator
-    const involvedKeys = [...new Set(pin.entries.map(e => e.userKey))];
-    const isSolo = involvedKeys.length === 1;
-    const idx    = users.findIndex(([k]) => k === involvedKeys[0]);
-    const color  = isSolo ? userColor(idx) : '#F0D898';
-    const radius = isSolo ? 6 : 7;
-
-    // Popup: species + location, then each person's name + date
-    const rows = pin.entries
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map(e => `<span style="color:${userColor(users.findIndex(([k])=>k===e.userKey))}">${e.display}</span> · ${e.date}`)
-      .join('<br>');
-    const popupHtml = `<b>${pin.species}</b>${pin.location ? '<br>' + pin.location : ''}<br>${rows}`;
-
-    const marker = L.circleMarker([pin.lat, pin.lng], {
-      radius, color, fillColor: color, fillOpacity: 0.8, weight: 1.5
-    }).bindPopup(popupHtml);
-    marker.addTo(map);
-
-    // Register marker under every user involved so toggling hides/shows correctly
-    involvedKeys.forEach(k => { if (userMarkers[k]) userMarkers[k].add(marker); });
+  // Per-user layer groups for toggling
+  const layers = {};
+  users.forEach(([key, u], idx) => {
+    const color = userColor(idx);
+    const group = L.layerGroup().addTo(map);
+    layers[key] = group;
+    u.birds.forEach(b => {
+      if (b.lat == null || b.lng == null) return;
+      const [olat, olng] = getOffset(b.lat, b.lng);
+      const marker = L.circleMarker([olat, olng], {
+        radius: 6, color, fillColor: color, fillOpacity: 0.75, weight: 1.5
+      });
+      marker.bindPopup(`<b>${b.species}</b><br>${u.display}<br>${b.date}${b.location ? '<br>' + b.location : ''}`);
+      group.addLayer(marker);
+    });
   });
 
   // User filter buttons — color per user, gray when inactive
   const filterEl = document.getElementById('map-user-filters');
   const activeUsers = new Set(users.map(([k]) => k));
-
-  function refreshMarkers() {
-    // For each marker, show if at least one of its users is active
-    allPins.forEach(pin => {
-      const involvedKeys = [...new Set(pin.entries.map(e => e.userKey))];
-      // Find the marker — look it up via userMarkers
-      const marker = [...(userMarkers[involvedKeys[0]] || [])].find(m => {
-        const ll = m.getLatLng();
-        return ll.lat === pin.lat && ll.lng === pin.lng;
-      });
-      if (!marker) return;
-      const anyActive = involvedKeys.some(k => activeUsers.has(k));
-      if (anyActive) { if (!map.hasLayer(marker)) marker.addTo(map); }
-      else           { if (map.hasLayer(marker))  map.removeLayer(marker); }
-    });
-  }
 
   function renderFilterButtons() {
     filterEl.innerHTML = users.map(([key, u], idx) => {
@@ -685,22 +662,26 @@ function renderMap() {
     const color = userColor(idx);
     if (activeUsers.has(key)) {
       activeUsers.delete(key);
+      map.removeLayer(layers[key]);
       btn.classList.remove('active');
       btn.style.borderColor = 'rgba(245,237,214,0.15)';
       btn.style.color = 'rgba(245,237,214,0.25)';
     } else {
       activeUsers.add(key);
+      map.addLayer(layers[key]);
       btn.classList.add('active');
       btn.style.borderColor = color;
       btn.style.color = color;
     }
-    refreshMarkers();
   };
 
   window.mapSelectAll = function(on) {
     users.forEach(([key]) => { if (on) activeUsers.add(key); else activeUsers.delete(key); });
     renderFilterButtons();
-    refreshMarkers();
+    users.forEach(([key]) => {
+      if (on) map.addLayer(layers[key]);
+      else map.removeLayer(layers[key]);
+    });
   };
 
   renderFilterButtons();
