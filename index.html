@@ -176,8 +176,18 @@
   }
   .exclusive-card {
     background: rgba(245,237,214,0.04); border: 1px solid rgba(200,149,42,0.15);
-    border-radius: 6px; padding: 0.75rem 0.9rem;
+    border-radius: 6px; overflow: hidden;
   }
+  .exclusive-img {
+    width: 100%; height: 130px; object-fit: cover; display: block;
+    background: rgba(245,237,214,0.04);
+  }
+  .exclusive-img-placeholder {
+    width: 100%; height: 130px; display: flex; align-items: center; justify-content: center;
+    font-size: 2rem; background: rgba(245,237,214,0.03);
+    color: rgba(245,237,214,0.1);
+  }
+  .exclusive-body { padding: 0.75rem 0.9rem; }
   .exclusive-species { font-size: 0.9rem; color: var(--pale-gold); margin-bottom: 0.2rem; }
   .exclusive-who { font-size: 0.8rem; color: rgba(245,237,214,0.5); }
 
@@ -319,8 +329,8 @@
 
 <!-- TOP 10 -->
 <div class="page" id="page-top10">
-  <div class="page-title">Top 10 Species</div>
-  <div class="page-sub">Most-logged birds — tiebreaker: who found it first</div>
+  <div class="page-title">Species Found</div>
+  <div class="page-sub">All species — sorted by how many birders found them</div>
   <div class="card" id="top10-list"></div>
 </div>
 
@@ -360,7 +370,7 @@ const TABS = [
   { id: 'map',        label: '🗺 Map' },
   { id: 'heat',       label: '🔥 Heatmap' },
   { id: 'exclusives', label: '🎯 Solo Finds' },
-  { id: 'top10',      label: '🏅 Top 10' },
+  { id: 'top10',      label: '🏅 Species' },
   { id: 'bestday',    label: '⭐ Best Day' },
   { id: 'leaderboard',label: '🏆 Leaderboard' },
 ];
@@ -587,46 +597,68 @@ function renderMap() {
     attribution: '© OpenStreetMap © CARTO', maxZoom: 18
   }).addTo(map);
 
-  // Offset markers sharing the same lat/lng so they don't stack
-  const coordCount = {};
-  users.forEach(([, u]) => {
+  // Group sightings by lat+lng+species — shared location = one pin, multiple names
+  // Key: "lat,lng,species" → { lat, lng, species, location, entries: [{userKey, display, date}] }
+  const pinMap = {};
+  users.forEach(([userKey, u]) => {
     u.birds.forEach(b => {
       if (b.lat == null || b.lng == null) return;
-      const key = `${b.lat},${b.lng}`;
-      coordCount[key] = (coordCount[key] || 0) + 1;
+      const key = `${b.lat},${b.lng},${(b.species||'').toLowerCase()}`;
+      if (!pinMap[key]) {
+        pinMap[key] = { lat: b.lat, lng: b.lng, species: b.species, location: b.location, entries: [] };
+      }
+      pinMap[key].entries.push({ userKey, display: u.display, date: b.date });
     });
   });
-  const coordIndex = {};
-  function getOffset(lat, lng) {
-    const key = `${lat},${lng}`;
-    const total = coordCount[key] || 1;
-    if (total === 1) return [lat, lng];
-    const idx = coordIndex[key] = (coordIndex[key] ?? -1) + 1;
-    const angle = (2 * Math.PI * idx) / total;
-    const spread = 0.018;
-    return [lat + Math.sin(angle) * spread, lng + Math.cos(angle) * spread];
-  }
 
-  // Per-user layer groups for toggling
-  const layers = {};
-  users.forEach(([key, u], idx) => {
-    const color = userColor(idx);
-    const group = L.layerGroup().addTo(map);
-    layers[key] = group;
-    u.birds.forEach(b => {
-      if (b.lat == null || b.lng == null) return;
-      const [olat, olng] = getOffset(b.lat, b.lng);
-      const marker = L.circleMarker([olat, olng], {
-        radius: 6, color, fillColor: color, fillOpacity: 0.75, weight: 1.5
-      });
-      marker.bindPopup(`<b>${b.species}</b><br>${u.display}<br>${b.date}${b.location ? '<br>' + b.location : ''}`);
-      group.addLayer(marker);
-    });
+  // Build markers; track which markers each user owns so toggling works
+  const userMarkers = {}; // userKey -> Set of L.circleMarker
+  users.forEach(([k]) => { userMarkers[k] = new Set(); });
+
+  const allPins = Object.values(pinMap);
+  allPins.forEach(pin => {
+    // Color: if one user → their color; if multiple → gold shared indicator
+    const involvedKeys = [...new Set(pin.entries.map(e => e.userKey))];
+    const isSolo = involvedKeys.length === 1;
+    const idx    = users.findIndex(([k]) => k === involvedKeys[0]);
+    const color  = isSolo ? userColor(idx) : '#F0D898';
+    const radius = isSolo ? 6 : 7;
+
+    // Popup: species + location, then each person's name + date
+    const rows = pin.entries
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(e => `<span style="color:${userColor(users.findIndex(([k])=>k===e.userKey))}">${e.display}</span> · ${e.date}`)
+      .join('<br>');
+    const popupHtml = `<b>${pin.species}</b>${pin.location ? '<br>' + pin.location : ''}<br>${rows}`;
+
+    const marker = L.circleMarker([pin.lat, pin.lng], {
+      radius, color, fillColor: color, fillOpacity: 0.8, weight: 1.5
+    }).bindPopup(popupHtml);
+    marker.addTo(map);
+
+    // Register marker under every user involved so toggling hides/shows correctly
+    involvedKeys.forEach(k => { if (userMarkers[k]) userMarkers[k].add(marker); });
   });
 
   // User filter buttons — color per user, gray when inactive
   const filterEl = document.getElementById('map-user-filters');
   const activeUsers = new Set(users.map(([k]) => k));
+
+  function refreshMarkers() {
+    // For each marker, show if at least one of its users is active
+    allPins.forEach(pin => {
+      const involvedKeys = [...new Set(pin.entries.map(e => e.userKey))];
+      // Find the marker — look it up via userMarkers
+      const marker = [...(userMarkers[involvedKeys[0]] || [])].find(m => {
+        const ll = m.getLatLng();
+        return ll.lat === pin.lat && ll.lng === pin.lng;
+      });
+      if (!marker) return;
+      const anyActive = involvedKeys.some(k => activeUsers.has(k));
+      if (anyActive) { if (!map.hasLayer(marker)) marker.addTo(map); }
+      else           { if (map.hasLayer(marker))  map.removeLayer(marker); }
+    });
+  }
 
   function renderFilterButtons() {
     filterEl.innerHTML = users.map(([key, u], idx) => {
@@ -643,25 +675,22 @@ function renderMap() {
     const color = userColor(idx);
     if (activeUsers.has(key)) {
       activeUsers.delete(key);
-      map.removeLayer(layers[key]);
       btn.classList.remove('active');
       btn.style.borderColor = 'rgba(245,237,214,0.15)';
       btn.style.color = 'rgba(245,237,214,0.25)';
     } else {
       activeUsers.add(key);
-      map.addLayer(layers[key]);
       btn.classList.add('active');
       btn.style.borderColor = color;
       btn.style.color = color;
     }
+    refreshMarkers();
   };
 
   window.mapSelectAll = function(on) {
-    users.forEach(([key], idx) => {
-      if (on && !activeUsers.has(key)) { activeUsers.add(key); map.addLayer(layers[key]); }
-      if (!on && activeUsers.has(key)) { activeUsers.delete(key); map.removeLayer(layers[key]); }
-    });
+    users.forEach(([key]) => { if (on) activeUsers.add(key); else activeUsers.delete(key); });
     renderFilterButtons();
+    refreshMarkers();
   };
 
   renderFilterButtons();
@@ -720,13 +749,32 @@ function renderExclusives() {
     const grid = document.getElementById('exclusives-grid');
     const filtered = exclusives.filter(e => activeUsers.has(e.userKey));
     if (!filtered.length) { grid.innerHTML = '<div class="empty-state">No solo finds for selected birders.</div>'; return; }
-    grid.innerHTML = filtered.map(e => {
+    grid.innerHTML = filtered.map((e, i) => {
       const u = allData[e.userKey];
       return `<div class="exclusive-card">
-        <div class="exclusive-species">${e.species}</div>
-        <div class="exclusive-who">${u ? u.display : e.userKey}</div>
+        <div class="exclusive-img-placeholder" id="excl-ph-${i}">🦅</div>
+        <div class="exclusive-body">
+          <div class="exclusive-species">${e.species}</div>
+          <div class="exclusive-who">${u ? u.display : e.userKey}</div>
+        </div>
       </div>`;
     }).join('');
+    // Lazy-load images after DOM is set
+    filtered.forEach((e, i) => {
+      fetchBirdImage(e.species).then(imgUrl => {
+        const ph = document.getElementById('excl-ph-' + i);
+        if (!ph) return;
+        if (imgUrl) {
+          const img = document.createElement('img');
+          img.src = imgUrl;
+          img.alt = e.species;
+          img.className = 'exclusive-img';
+          ph.replaceWith(img);
+        } else {
+          ph.textContent = '🐦';
+        }
+      });
+    });
   }
 
   window.toggleExclusiveUser = function(key, btn) {
@@ -739,32 +787,67 @@ function renderExclusives() {
 
 // ── RENDER: TOP 10 ───────────────────────────────────────────────────────────
 function renderTop10() {
-  // Count sightings per species; tiebreak by earliest date any user logged it
-  const speciesData = {}; // species -> { count, firstDate }
-  Object.values(allData).forEach(u => {
+  // Build species -> { users: Set, firstDate, finders: [{display, date}] }
+  const speciesData = {};
+  const users = Object.entries(allData);
+  users.forEach(([key, u]) => {
     u.birds.forEach(b => {
       if (!b.species) return;
-      if (!speciesData[b.species]) speciesData[b.species] = { count: 0, firstDate: b.date || '9999' };
-      speciesData[b.species].count++;
-      if (b.date && b.date < speciesData[b.species].firstDate) speciesData[b.species].firstDate = b.date;
+      const norm = b.species.trim();
+      if (!speciesData[norm]) speciesData[norm] = { users: new Set(), firstDate: b.date || '9999', finders: [] };
+      if (!speciesData[norm].users.has(key)) {
+        speciesData[norm].users.add(key);
+        speciesData[norm].finders.push({ display: u.display, date: b.date || '', userKey: key });
+        if (b.date && b.date < speciesData[norm].firstDate) speciesData[norm].firstDate = b.date;
+      }
     });
   });
 
   const sorted = Object.entries(speciesData)
-    .sort(([, a], [, b]) => b.count - a.count || a.firstDate.localeCompare(b.firstDate))
-    .slice(0, 10);
+    .sort(([, a], [, b]) => b.users.size - a.users.size || a.firstDate.localeCompare(b.firstDate));
 
+  const totalUsers = users.length;
   const el = document.getElementById('top10-list');
   if (!sorted.length) { el.innerHTML = '<div class="empty-state">No data yet.</div>'; return; }
-  el.innerHTML = sorted.map(([species, d], i) => `
+
+  el.innerHTML = sorted.map(([species, d], i) => {
+    const count = d.users.size;
+    const findersHtml = d.finders
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(f => {
+        const idx = users.findIndex(([k]) => k === f.userKey);
+        return `<span style="color:${userColor(idx)}">${f.display}</span>${f.date ? ' · ' + f.date : ''}`;
+      }).join('<br>');
+    return `
     <div class="top10-row">
       <div class="top10-rank">${i + 1}</div>
       <div class="top10-species">${species}</div>
-      <div class="top10-meta">${d.firstDate !== '9999' ? 'First: ' + d.firstDate : ''}</div>
-      <div class="top10-count">${d.count} ${d.count === 1 ? 'birder' : 'birders'}</div>
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
+        <button class="top10-count" onclick="window.toggleFinders(this)"
+          data-html="${encodeURIComponent(findersHtml)}"
+          style="cursor:pointer;">
+          ${count} ${count === 1 ? 'birder' : 'birders'}
+        </button>
+      </div>
     </div>
-  `).join('');
+    <div class="top10-finders" style="display:none;padding:0.4rem 0 0.6rem 3.5rem;font-size:0.82rem;line-height:1.8;border-bottom:1px solid rgba(200,149,42,0.1);"></div>`;
+  }).join('');
 }
+
+window.toggleFinders = function(btn) {
+  const row = btn.closest('.top10-row');
+  const drawer = row.nextElementSibling;
+  if (!drawer || !drawer.classList.contains('top10-finders')) return;
+  const isOpen = drawer.style.display !== 'none';
+  if (isOpen) {
+    drawer.style.display = 'none';
+    btn.style.background = 'rgba(200,149,42,0.12)';
+  } else {
+    drawer.innerHTML = decodeURIComponent(btn.dataset.html);
+    drawer.style.display = 'block';
+    btn.style.background = 'rgba(200,149,42,0.28)';
+  }
+};
 
 // ── RENDER: BEST DAY ─────────────────────────────────────────────────────────
 function renderBestDay() {
@@ -820,6 +903,30 @@ function renderLeaderboard() {
       <div class="lb-pts">${r.pts} pts</div>
     </div>
   `).join('');
+}
+
+// ── WIKIPEDIA BIRD IMAGE ────────────────────────────────────────────────────
+async function fetchBirdImage(species) {
+  try {
+    const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(species)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.thumbnail?.source) return data.thumbnail.source;
+    }
+  } catch(e) { /* fall through */ }
+  try {
+    const sRes = await fetch(`https://en.wikipedia.org/w/api.php?origin=*&action=query&list=search&srsearch=${encodeURIComponent(species + ' bird')}&format=json&srlimit=1`);
+    const sData = await sRes.json();
+    const title = sData?.query?.search?.[0]?.title;
+    if (title) {
+      const res2 = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+      if (res2.ok) {
+        const data2 = await res2.json();
+        if (data2.thumbnail?.source) return data2.thumbnail.source;
+      }
+    }
+  } catch(e) { /* no image */ }
+  return null;
 }
 
 // ── BOOT ─────────────────────────────────────────────────────────────────────
