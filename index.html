@@ -115,13 +115,18 @@
   .map-toggle { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
   .map-toggle button {
     background: rgba(245,237,214,0.06); border: 1px solid rgba(200,149,42,0.25);
-    color: rgba(245,237,214,0.6); border-radius: var(--radius);
+    color: rgba(245,237,214,0.25); border-radius: var(--radius);
     padding: 0.4rem 0.9rem; font-size: 0.85rem; cursor: pointer;
     transition: all 0.15s;
   }
   .map-toggle button.active {
-    background: rgba(200,149,42,0.15); border-color: var(--gold); color: var(--gold);
+    background: rgba(200,149,42,0.15);
   }
+  .map-toggle .map-ctrl {
+    color: rgba(245,237,214,0.45); border-color: rgba(245,237,214,0.15);
+    font-size: 0.78rem; padding: 0.4rem 0.7rem;
+  }
+  .map-toggle .map-ctrl:hover { color: var(--cream); border-color: rgba(245,237,214,0.4); }
 
   /* ── TOP 10 ── */
   .top10-row {
@@ -217,6 +222,10 @@
   <div class="page-sub">Every sighting logged with a location</div>
   <div class="card">
     <div class="map-toggle" id="map-user-filters"></div>
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+      <button class="map-toggle map-ctrl" onclick="window.mapSelectAll(true)">Select all</button>
+      <button class="map-toggle map-ctrl" onclick="window.mapSelectAll(false)">Deselect all</button>
+    </div>
     <div id="map-pins"></div>
   </div>
 </div>
@@ -382,7 +391,11 @@ function renderScoreTime() {
       animation: { duration: 1200, easing: 'easeInOutQuart' },
       plugins: {
         legend: { labels: { color: '#F5EDD6', font: { family: 'Source Sans 3' } } },
-        tooltip: { mode: 'index', intersect: false },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          itemSort: (a, b) => b.raw - a.raw,
+        },
       },
       scales: {
         x: {
@@ -407,6 +420,26 @@ function renderMap() {
     attribution: '© OpenStreetMap © CARTO', maxZoom: 18
   }).addTo(map);
 
+  // Offset markers sharing the same lat/lng so they don't stack
+  const coordCount = {};
+  users.forEach(([, u]) => {
+    u.birds.forEach(b => {
+      if (b.lat == null || b.lng == null) return;
+      const key = `${b.lat},${b.lng}`;
+      coordCount[key] = (coordCount[key] || 0) + 1;
+    });
+  });
+  const coordIndex = {};
+  function getOffset(lat, lng) {
+    const key = `${lat},${lng}`;
+    const total = coordCount[key] || 1;
+    if (total === 1) return [lat, lng];
+    const idx = coordIndex[key] = (coordIndex[key] ?? -1) + 1;
+    const angle = (2 * Math.PI * idx) / total;
+    const spread = 0.018;
+    return [lat + Math.sin(angle) * spread, lng + Math.cos(angle) * spread];
+  }
+
   // Per-user layer groups for toggling
   const layers = {};
   users.forEach(([key, u], idx) => {
@@ -415,7 +448,8 @@ function renderMap() {
     layers[key] = group;
     u.birds.forEach(b => {
       if (b.lat == null || b.lng == null) return;
-      const marker = L.circleMarker([b.lat, b.lng], {
+      const [olat, olng] = getOffset(b.lat, b.lng);
+      const marker = L.circleMarker([olat, olng], {
         radius: 6, color, fillColor: color, fillOpacity: 0.75, weight: 1.5
       });
       marker.bindPopup(`<b>${b.species}</b><br>${u.display}<br>${b.date}${b.location ? '<br>' + b.location : ''}`);
@@ -423,25 +457,47 @@ function renderMap() {
     });
   });
 
-  // User filter buttons
+  // User filter buttons — color per user, gray when inactive
   const filterEl = document.getElementById('map-user-filters');
   const activeUsers = new Set(users.map(([k]) => k));
-  filterEl.innerHTML = users.map(([key, u], idx) =>
-    `<button class="active" style="border-color:${userColor(idx)};color:${userColor(idx)};"
-      data-key="${key}" onclick="window.toggleMapUser('${key}', this)">${u.display}</button>`
-  ).join('');
 
-  window.toggleMapUser = function(key, btn) {
+  function renderFilterButtons() {
+    filterEl.innerHTML = users.map(([key, u], idx) => {
+      const color = userColor(idx);
+      const on = activeUsers.has(key);
+      return `<button
+        class="${on ? 'active' : ''}"
+        style="border-color:${on ? color : 'rgba(245,237,214,0.15)'};color:${on ? color : 'rgba(245,237,214,0.25)'};"
+        onclick="window.toggleMapUser('${key}', this, ${idx})">${u.display}</button>`;
+    }).join('');
+  }
+
+  window.toggleMapUser = function(key, btn, idx) {
+    const color = userColor(idx);
     if (activeUsers.has(key)) {
       activeUsers.delete(key);
       map.removeLayer(layers[key]);
       btn.classList.remove('active');
+      btn.style.borderColor = 'rgba(245,237,214,0.15)';
+      btn.style.color = 'rgba(245,237,214,0.25)';
     } else {
       activeUsers.add(key);
       map.addLayer(layers[key]);
       btn.classList.add('active');
+      btn.style.borderColor = color;
+      btn.style.color = color;
     }
   };
+
+  window.mapSelectAll = function(on) {
+    users.forEach(([key], idx) => {
+      if (on && !activeUsers.has(key)) { activeUsers.add(key); map.addLayer(layers[key]); }
+      if (!on && activeUsers.has(key)) { activeUsers.delete(key); map.removeLayer(layers[key]); }
+    });
+    renderFilterButtons();
+  };
+
+  renderFilterButtons();
 }
 
 // ── RENDER: HEATMAP ──────────────────────────────────────────────────────────
@@ -458,8 +514,8 @@ function renderHeatmap() {
     .map(b => [b.lat, b.lng, 1]);
 
   if (points.length) {
-    L.heatLayer(points, { radius: 25, blur: 15, maxZoom: 13,
-      gradient: { 0.4: '#1A2E1A', 0.6: '#4A6741', 0.8: '#C8952A', 1.0: '#F0D898' }
+    L.heatLayer(points, { radius: 55, blur: 35, maxZoom: 18, minOpacity: 0.4,
+      gradient: { 0.2: '#1A2E1A', 0.5: '#4A6741', 0.8: '#C8952A', 1.0: '#F0D898' }
     }).addTo(map);
   }
 }
@@ -467,24 +523,25 @@ function renderHeatmap() {
 // ── RENDER: EXCLUSIVES ───────────────────────────────────────────────────────
 function renderExclusives() {
   // Count how many users logged each species
-  const speciesUsers = {}; // species -> Set of userKeys
+  const speciesUsers = {}; // normalized species -> { display, users: Set }
   Object.entries(allData).forEach(([key, u]) => {
     u.birds.forEach(b => {
       if (!b.species) return;
-      if (!speciesUsers[b.species]) speciesUsers[b.species] = new Set();
-      speciesUsers[b.species].add(key);
+      const norm = b.species.trim().toLowerCase();
+      if (!speciesUsers[norm]) speciesUsers[norm] = { display: b.species.trim(), users: new Set() };
+      speciesUsers[norm].users.add(key);
     });
   });
 
   // Species with exactly 1 user
   const exclusives = Object.entries(speciesUsers)
-    .filter(([, s]) => s.size === 1)
-    .map(([species, s]) => ({ species, userKey: [...s][0] }))
+    .filter(([, v]) => v.users.size === 1)
+    .map(([, v]) => ({ species: v.display, userKey: [...v.users][0] }))
     .sort((a, b) => a.species.localeCompare(b.species));
 
   const users = Object.entries(allData);
 
-  // Filter buttons
+  // Filter buttons — rebuild each time renderExclusives is called
   const filterEl = document.getElementById('exclusives-user-filters');
   const activeUsers = new Set(users.map(([k]) => k));
   filterEl.innerHTML = users.map(([key, u], idx) =>
@@ -608,16 +665,13 @@ function renderLeaderboard() {
     renderBestDay();
     renderLeaderboard();
     // Defer map/heatmap/exclusives until tab is opened (maps need visible container)
-    let mapsReady = false;
+    let mapReady = false, heatReady = false, exclusivesReady = false;
     const origShowTab = window.showTab;
     window.showTab = function(id) {
       origShowTab(id);
-      if (!mapsReady && (id === 'map' || id === 'heat' || id === 'exclusives')) {
-        renderMap();
-        renderHeatmap();
-        renderExclusives();
-        mapsReady = true;
-      }
+      if (id === 'map'        && !mapReady)        { renderMap();        mapReady        = true; }
+      if (id === 'heat'       && !heatReady)       { renderHeatmap();    heatReady       = true; }
+      if (id === 'exclusives' && !exclusivesReady) { renderExclusives(); exclusivesReady = true; }
     };
   } catch(e) {
     console.error('Load failed:', e);
