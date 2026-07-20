@@ -84,7 +84,7 @@
     display: none; background: none; border: 1px solid rgba(200,149,42,0.4);
     border-radius: var(--radius); color: var(--gold); font-size: 1.05rem;
     line-height: 1; padding: 0.4rem 0.65rem; cursor: pointer; transition: all 0.15s;
-    flex-shrink: 0;
+    flex-shrink: 0; margin-left: auto;
   }
   .nav-hamburger:hover { background: rgba(200,149,42,0.15); }
   .nav-tab {
@@ -179,17 +179,23 @@
     border-radius: 6px; overflow: hidden;
   }
   .exclusive-img {
-    width: 100%; height: 130px; object-fit: cover; display: block;
-    background: rgba(245,237,214,0.04);
+    width: 100%; height: 180px; object-fit: contain; display: block;
+    background: #111d11;
   }
   .exclusive-img-placeholder {
-    width: 100%; height: 130px; display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 180px; display: flex; align-items: center; justify-content: center;
     font-size: 2rem; background: rgba(245,237,214,0.03);
     color: rgba(245,237,214,0.1);
   }
-  .exclusive-body { padding: 0.75rem 0.9rem; }
+  .exclusive-body { padding: 0.6rem 0.9rem 0.75rem; }
   .exclusive-species { font-size: 0.9rem; color: var(--pale-gold); margin-bottom: 0.2rem; }
   .exclusive-who { font-size: 0.8rem; color: rgba(245,237,214,0.5); }
+  .exclusive-det {
+    display: inline-block; font-size: 0.68rem; margin-top: 0.25rem;
+    padding: 0.1rem 0.45rem; border-radius: 2px; font-weight: 600; letter-spacing: 0.03em;
+  }
+  .exclusive-det.seen { background: rgba(74,103,65,0.3); color: #b8d4b0; border: 1px solid rgba(74,103,65,0.5); }
+  .exclusive-det.heard { background: rgba(92,61,30,0.4); color: #d4b896; border: 1px solid rgba(92,61,30,0.6); }
 
   /* ── BEST DAY ── */
   .bestday-row {
@@ -323,7 +329,11 @@
   <div class="page-sub">Species logged by only one person</div>
   <div class="card">
     <div class="map-toggle" id="exclusives-user-filters"></div>
-    <div id="exclusives-grid" class="exclusives-grid" style="margin-top:1rem;"></div>
+    <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+      <button class="map-toggle map-ctrl" onclick="window.exclusivesSelectAll(true)">Select all</button>
+      <button class="map-toggle map-ctrl" onclick="window.exclusivesSelectAll(false)">Deselect all</button>
+    </div>
+    <div id="exclusives-grid" class="exclusives-grid" style="margin-top:0;"></div>
   </div>
 </div>
 
@@ -383,8 +393,8 @@ function renderNav(active) {
   document.getElementById('nav-mount').innerHTML = `
     <nav>
       <div class="nav-brand">🦅 Big Year Stats</div>
-      <button class="nav-hamburger" onclick="window.toggleNavMenu()" aria-label="Menu">☰</button>
       <div class="nav-tabs" id="nav-tabs-list">${tabs}</div>
+      <button class="nav-hamburger" onclick="window.toggleNavMenu()" aria-label="Menu">☰</button>
     </nav>`;
 }
 
@@ -732,7 +742,13 @@ function renderExclusives() {
   // Species with exactly 1 user
   const exclusives = Object.entries(speciesUsers)
     .filter(([, v]) => v.users.size === 1)
-    .map(([, v]) => ({ species: v.display, userKey: [...v.users][0] }))
+    .map(([, v]) => {
+      const userKey = [...v.users][0];
+      const u = allData[userKey];
+      const bird = u ? u.birds.find(b => b.species && b.species.trim().toLowerCase() === v.display.toLowerCase()) : null;
+      const detection = bird ? (bird.detection || (bird.score === 2 ? 'seen' : 'heard')) : 'seen';
+      return { species: v.display, userKey, detection };
+    })
     .sort((a, b) => a.species.localeCompare(b.species));
 
   const users = Object.entries(allData);
@@ -740,10 +756,17 @@ function renderExclusives() {
   // Filter buttons — rebuild each time renderExclusives is called
   const filterEl = document.getElementById('exclusives-user-filters');
   const activeUsers = new Set(users.map(([k]) => k));
-  filterEl.innerHTML = users.map(([key, u], idx) =>
-    `<button class="active" style="border-color:${userColor(idx)};color:${userColor(idx)};"
-      data-key="${key}" onclick="window.toggleExclusiveUser('${key}', this)">${u.display}</button>`
-  ).join('');
+
+  function renderExclFilterButtons() {
+    filterEl.innerHTML = users.map(([key, u], idx) => {
+      const color = userColor(idx);
+      const on = activeUsers.has(key);
+      return `<button
+        class="${on ? 'active' : ''}"
+        style="border-color:${on ? color : 'rgba(245,237,214,0.15)'};color:${on ? color : 'rgba(245,237,214,0.25)'};"
+        onclick="window.toggleExclusiveUser('${key}', this, ${idx})">${u.display}</button>`;
+    }).join('');
+  }
 
   function renderGrid() {
     const grid = document.getElementById('exclusives-grid');
@@ -751,11 +774,14 @@ function renderExclusives() {
     if (!filtered.length) { grid.innerHTML = '<div class="empty-state">No solo finds for selected birders.</div>'; return; }
     grid.innerHTML = filtered.map((e, i) => {
       const u = allData[e.userKey];
+      const detLabel = e.detection === 'heard' ? '👂 Heard' : '👁 Seen';
+      const detCls   = e.detection === 'heard' ? 'heard' : 'seen';
       return `<div class="exclusive-card">
         <div class="exclusive-img-placeholder" id="excl-ph-${i}">🦅</div>
         <div class="exclusive-body">
           <div class="exclusive-species">${e.species}</div>
           <div class="exclusive-who">${u ? u.display : e.userKey}</div>
+          <div class="exclusive-det ${detCls}">${detLabel}</div>
         </div>
       </div>`;
     }).join('');
@@ -777,11 +803,29 @@ function renderExclusives() {
     });
   }
 
-  window.toggleExclusiveUser = function(key, btn) {
-    if (activeUsers.has(key)) { activeUsers.delete(key); btn.classList.remove('active'); }
-    else { activeUsers.add(key); btn.classList.add('active'); }
+  window.toggleExclusiveUser = function(key, btn, idx) {
+    const color = userColor(idx);
+    if (activeUsers.has(key)) {
+      activeUsers.delete(key);
+      btn.classList.remove('active');
+      btn.style.borderColor = 'rgba(245,237,214,0.15)';
+      btn.style.color = 'rgba(245,237,214,0.25)';
+    } else {
+      activeUsers.add(key);
+      btn.classList.add('active');
+      btn.style.borderColor = color;
+      btn.style.color = color;
+    }
     renderGrid();
   };
+
+  window.exclusivesSelectAll = function(on) {
+    users.forEach(([key]) => { if (on) activeUsers.add(key); else activeUsers.delete(key); });
+    renderExclFilterButtons();
+    renderGrid();
+  };
+
+  renderExclFilterButtons();
   renderGrid();
 }
 
@@ -797,7 +841,7 @@ function renderTop10() {
       if (!speciesData[norm]) speciesData[norm] = { users: new Set(), firstDate: b.date || '9999', finders: [] };
       if (!speciesData[norm].users.has(key)) {
         speciesData[norm].users.add(key);
-        speciesData[norm].finders.push({ display: u.display, date: b.date || '', userKey: key });
+        speciesData[norm].finders.push({ display: u.display, date: b.date || '', userKey: key, detection: b.detection || (b.score === 2 ? 'seen' : 'heard') });
         if (b.date && b.date < speciesData[norm].firstDate) speciesData[norm].firstDate = b.date;
       }
     });
@@ -816,7 +860,8 @@ function renderTop10() {
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(f => {
         const idx = users.findIndex(([k]) => k === f.userKey);
-        return `<span style="color:${userColor(idx)}">${f.display}</span>${f.date ? ' · ' + f.date : ''}`;
+        const detLabel = f.detection === 'heard' ? '👂 Heard' : '👁 Seen';
+        return `<span style="color:${userColor(idx)}">${f.display}</span>${f.date ? ' · ' + f.date : ''} · ${detLabel}`;
       }).join('<br>');
     return `
     <div class="top10-row">
