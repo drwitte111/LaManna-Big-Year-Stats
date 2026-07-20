@@ -504,10 +504,10 @@ function renderScoreTime() {
 
   // ms per date step — lower = faster. RAF interpolates sub-frames within each step.
   const SPEEDS = [
-    { label: '1×',  msPerStep: 150 },
-    { label: '2×',  msPerStep: 75  },
-    { label: '4×',  msPerStep: 35  },
-    { label: '8×',  msPerStep: 15  },
+    { label: '1×',  msPerStep: 1000 },
+    { label: '2×',  msPerStep: 500  },
+    { label: '4×',  msPerStep: 250  },
+    { label: '8×',  msPerStep: 125  },
   ];
 
   const playBtn   = document.getElementById('play-btn');
