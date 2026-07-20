@@ -497,7 +497,7 @@ const maxScore = Math.max(
 );
 
 // Round up to the nearest 5
-const yMax = Math.ceil(maxScore / 5) * 5;
+const yMax = Math.ceil(maxScore / 5) * 5 + 5;
   
   const chart = new Chart(document.getElementById('chart-score-time'), {
     type: 'line',
