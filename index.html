@@ -490,6 +490,15 @@ function renderScoreTime() {
     };
   });
 
+// Find the highest cumulative score
+const maxScore = Math.max(
+  ...fullDatasets.map(ds => ds.fullData[ds.fullData.length - 1]),
+  10 // minimum chart height
+);
+
+// Round up to the nearest 5
+const yMax = Math.ceil(maxScore / 5) * 5 + 5;
+
   const chart = new Chart(document.getElementById('chart-score-time'), {
     type: 'line',
     data: { labels: allDates.slice(0, 1), datasets: fullDatasets },
@@ -505,11 +514,19 @@ function renderScoreTime() {
           ticks: { color: 'rgba(245,237,214,0.5)', maxTicksLimit: 12 },
           grid:  { color: 'rgba(200,149,42,0.08)' },
         },
-        y: {
-          ticks: { color: 'rgba(245,237,214,0.5)' },
-          grid:  { color: 'rgba(200,149,42,0.08)' },
-          min: 0,
-        },
+      y: {
+  min: 0,
+  max: yMax,
+  ticks: {
+    stepSize: 5,
+    color: 'rgba(245,237,214,0.5)'
+  },
+  grid: {
+    color: 'rgba(200,149,42,0.08)'
+  }
+},
+          
+      
       },
     },
   });
