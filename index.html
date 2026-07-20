@@ -213,6 +213,27 @@
   .lb-pts { font-family: 'Playfair Display', serif; font-size: 1.6rem; color: var(--gold); }
   .lb-species { font-size: 0.8rem; color: rgba(245,237,214,0.45); }
 
+  /* ── PLAY BUTTON ── */
+  .chart-controls { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .btn-play {
+    background: rgba(200,149,42,0.15); border: 1px solid rgba(200,149,42,0.4);
+    color: var(--gold); border-radius: var(--radius);
+    padding: 0.45rem 1.1rem; font-family: 'Source Sans 3', sans-serif;
+    font-size: 0.88rem; cursor: pointer; transition: all 0.15s;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .btn-play:hover { background: rgba(200,149,42,0.28); }
+  .btn-play:disabled { opacity: 0.4; cursor: not-allowed; }
+  .play-date-label {
+    font-family: 'Playfair Display', serif; font-size: 0.95rem;
+    color: rgba(245,237,214,0.45); min-width: 90px;
+  }
+  .play-speed {
+    background: rgba(245,237,214,0.05); border: 1px solid rgba(200,149,42,0.2);
+    color: rgba(245,237,214,0.6); border-radius: var(--radius);
+    padding: 0.35rem 0.5rem; font-size: 0.8rem; cursor: pointer;
+  }
+
   @media (max-width: 700px) {
     nav {
       padding-left: max(1rem, env(safe-area-inset-left));
@@ -254,6 +275,11 @@
   <div class="page-title">Score Over Time</div>
   <div class="page-sub">Cumulative points across the year — one line per birder</div>
   <div class="card">
+    <div class="chart-controls">
+      <button class="btn-play" id="play-btn" onclick="window.playChart()">▶ Play</button>
+      <button class="play-speed" id="play-speed" onclick="window.cycleSpeed()" title="Playback speed">1×</button>
+      <span class="play-date-label" id="play-date"></span>
+    </div>
     <canvas id="chart-score-time" height="320"></canvas>
   </div>
 </div>
@@ -415,6 +441,7 @@ function userColor(idx) { return PALETTE[idx % PALETTE.length]; }
 // ── RENDER: SCORE OVER TIME ─────────────────────────────────────────────────
 function renderScoreTime() {
   const users = Object.entries(allData);
+
   // Collect all unique dates, prepend day-before so every line starts at 0
   const datesOnly = [...new Set(
     users.flatMap(([,u]) => u.birds.map(b => b.date).filter(Boolean))
@@ -425,38 +452,33 @@ function renderScoreTime() {
     return d.toISOString().slice(0, 10);
   }
   const startDate = datesOnly.length ? dayBefore(datesOnly[0]) : null;
-  const allDates = startDate ? [startDate, ...datesOnly] : datesOnly;
+  const allDates  = startDate ? [startDate, ...datesOnly] : datesOnly;
 
-  const datasets = users.map(([key, u], idx) => {
+  // Build full cumulative data per user
+  const fullDatasets = users.map(([key, u], idx) => {
     let cum = 0;
     const dataMap = {};
     u.birds.forEach(b => { if (b.date) { dataMap[b.date] = (dataMap[b.date] || 0) + (b.score || 1); } });
     const data = allDates.map(d => { cum += (dataMap[d] || 0); return cum; });
     return {
       label: u.display,
-      data,
+      fullData: data,
       borderColor: userColor(idx),
       backgroundColor: userColor(idx) + '22',
-      tension: 0.3,
-      fill: false,
-      pointRadius: 2,
-      pointHoverRadius: 5,
+      tension: 0.3, fill: false, pointRadius: 2, pointHoverRadius: 5,
+      data: data.slice(0, 1), // start with just the first point
     };
   });
 
-  new Chart(document.getElementById('chart-score-time'), {
+  const chart = new Chart(document.getElementById('chart-score-time'), {
     type: 'line',
-    data: { labels: allDates, datasets },
+    data: { labels: allDates.slice(0, 1), datasets: fullDatasets },
     options: {
       responsive: true,
-      animation: { duration: 1200, easing: 'easeInOutQuart' },
+      animation: false,
       plugins: {
         legend: { labels: { color: '#F5EDD6', font: { family: 'Source Sans 3' } } },
-        tooltip: {
-          mode: 'index',
-          intersect: false,
-          itemSort: (a, b) => b.raw - a.raw,
-        },
+        tooltip: { mode: 'index', intersect: false, itemSort: (a, b) => b.raw - a.raw },
       },
       scales: {
         x: {
@@ -466,10 +488,69 @@ function renderScoreTime() {
         y: {
           ticks: { color: 'rgba(245,237,214,0.5)' },
           grid:  { color: 'rgba(200,149,42,0.08)' },
+          min: 0,
         },
       },
     },
   });
+
+  // ── Playback state ───────────────────────────────────────────────────────
+  let playIndex   = 0;
+  let playTimer   = null;
+  let speedIndex  = 1;
+  const SPEEDS    = [
+    { label: '0.5×', ms: 120 },
+    { label: '1×',   ms: 60  },
+    { label: '2×',   ms: 30  },
+    { label: '4×',   ms: 15  },
+  ];
+  const playBtn   = document.getElementById('play-btn');
+  const dateLabel = document.getElementById('play-date');
+  const speedBtn  = document.getElementById('play-speed');
+
+  function setDateLabel(idx) {
+    dateLabel.textContent = allDates[idx] || '';
+  }
+
+  function stepTo(idx) {
+    chart.data.labels = allDates.slice(0, idx + 1);
+    chart.data.datasets.forEach(ds => { ds.data = ds.fullData.slice(0, idx + 1); });
+    chart.update('none');
+    setDateLabel(idx);
+    playIndex = idx;
+  }
+
+  function stopPlay() {
+    clearInterval(playTimer);
+    playTimer = null;
+    playBtn.textContent = playIndex >= allDates.length - 1 ? '↺ Replay' : '▶ Play';
+  }
+
+  function startPlay() {
+    // If at end, restart from beginning
+    if (playIndex >= allDates.length - 1) {
+      stepTo(0);
+    }
+    playBtn.textContent = '⏹ Stop';
+    playTimer = setInterval(() => {
+      if (playIndex >= allDates.length - 1) { stopPlay(); return; }
+      stepTo(playIndex + 1);
+    }, SPEEDS[speedIndex].ms);
+  }
+
+  window.playChart = function() {
+    if (playTimer) { stopPlay(); } else { startPlay(); }
+  };
+
+  window.cycleSpeed = function() {
+    speedIndex = (speedIndex + 1) % SPEEDS.length;
+    speedBtn.textContent = SPEEDS[speedIndex].label;
+    if (playTimer) { stopPlay(); startPlay(); } // restart at new speed
+  };
+
+  // Show full chart immediately (no play needed unless user wants animation)
+  stepTo(allDates.length - 1);
+  playBtn.textContent = '↺ Replay';
 }
 
 // ── RENDER: MAP (pins) ───────────────────────────────────────────────────────
