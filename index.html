@@ -57,18 +57,19 @@
   .loading-text { font-family: 'Playfair Display', serif; color: var(--gold); font-size: 1rem; }
 
   /* ── NAV ── */
-  nav {
-    background: rgba(26,46,26,0.97);
-    border-bottom: 1px solid rgba(200,149,42,0.3);
-    padding: 0 1.5rem;
-    padding-left: max(1.5rem, env(safe-area-inset-left));
-    padding-right: max(1.5rem, env(safe-area-inset-right));
-    padding-top: env(safe-area-inset-top);
-    display: flex; align-items: center; justify-content: space-between;
-    height: calc(52px + env(safe-area-inset-top));
-    position: sticky; top: 0; z-index: 100;
-    backdrop-filter: blur(8px);
-  }
+  nav, #nav-mount {
+  background: rgba(26,46,26,0.97);
+  border-bottom: 1px solid rgba(200,149,42,0.3);
+  padding: 0 1.5rem;
+  padding-left: max(1.5rem, env(safe-area-inset-left));
+  padding-right: max(1.5rem, env(safe-area-inset-right));
+  padding-top: env(safe-area-inset-top);
+  display: flex; align-items: center; justify-content: space-between;
+  height: calc(52px + env(safe-area-inset-top));
+  position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(8px);
+}
+
   .nav-brand {
     font-family: 'Playfair Display', serif;
     color: var(--gold); font-size: 1rem;
@@ -251,10 +252,11 @@
   }
 
   @media (max-width: 700px) {
-    nav {
-      padding-left: max(1rem, env(safe-area-inset-left));
-      padding-right: max(1rem, env(safe-area-inset-right));
-    }
+  nav, #nav-mount {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+
     .nav-hamburger { display: inline-block; }
     .nav-tabs {
       display: none;
@@ -284,7 +286,8 @@
   <div class="loading-text">Loading stats…</div>
 </div>
 
-<nav id="nav-mount"></nav>
+<div id="nav-mount"></div>
+
 
 <!-- SCORE OVER TIME -->
 <div class="page active" id="page-score">
@@ -390,13 +393,13 @@ function renderNav(active) {
     `<button class="nav-tab${active === t.id ? ' active' : ''}"
       onclick="window.navAndClose('${t.id}')">${t.label}</button>`
   ).join('');
+
   document.getElementById('nav-mount').innerHTML = `
-    <nav>
-      <div class="nav-brand">🦅 Big Year Stats</div>
-      <div class="nav-tabs" id="nav-tabs-list">${tabs}</div>
-      <button class="nav-hamburger" onclick="window.toggleNavMenu()" aria-label="Menu">☰</button>
-    </nav>`;
+    <div class="nav-brand">🦅 Big Year Stats</div>
+    <div class="nav-tabs" id="nav-tabs-list">${tabs}</div>
+    <button class="nav-hamburger" onclick="window.toggleNavMenu()" aria-label="Menu">☰</button>`;
 }
+
 
 window.toggleNavMenu = function() {
   const el = document.getElementById('nav-tabs-list');
