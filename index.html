@@ -55,6 +55,11 @@
   .loading-bird { font-size: 2.5rem; animation: flap 1s infinite alternate; }
   @keyframes flap { from { transform: translateY(0); } to { transform: translateY(-8px); } }
   .loading-text { font-family: 'Playfair Display', serif; color: var(--gold); font-size: 1rem; }
+/* ── LEAFLET Z-INDEX FIX ── */
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control { z-index: 1 !important; }
 
   /* ── NAV ── */
   nav, #nav-mount {
@@ -259,13 +264,14 @@
 
     .nav-hamburger { display: inline-block; }
     .nav-tabs {
-      display: none;
-      position: absolute; top: 100%; left: 0; right: 0;
-      flex-direction: column; align-items: stretch; gap: 0;
-      background: #16281a; border-bottom: 1px solid rgba(200,149,42,0.3);
-      padding: 0.4rem max(1rem, env(safe-area-inset-left));
-      max-height: 75vh; overflow-y: auto; z-index: 200;
-    }
+    display: none;
+    position: absolute; top: 100%; left: 0; right: 0;
+    flex-direction: column; align-items: stretch; gap: 0;
+    background: #16281a; border-bottom: 1px solid rgba(200,149,42,0.3);
+    padding: 0.4rem max(1rem, env(safe-area-inset-left));
+    max-height: 75vh; overflow-y: auto; z-index: 1001;
+  }
+
     .nav-tabs.open { display: flex; }
     .nav-tab {
       font-size: 0.9rem; padding: 0.7rem 0.85rem;
